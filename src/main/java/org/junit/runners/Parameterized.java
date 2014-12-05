@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.runner.Runner;
 import org.junit.runners.model.FrameworkMethod;
@@ -67,6 +69,14 @@ import org.junit.runners.parameterized.TestWithParameters;
  * <dt>...</dt>
  * <dd>...</dd>
  * </dl>
+ * To format the placeholder you can use patterns like {@link MessageFormat}.<br>
+ * For Example if you:
+ * <ul>
+ * <li>want specified leading zero for the {index} placeholder, you can use:
+ * <code>{index,number,0000}</code></li>
+ * <li>want format a parameter (placeholder with index 2) of type date, you can
+ * use: <code>{2,date,full}</code></li>
+ * </ul>
  * <p>
  * In the example given above, the <code>Parameterized</code> runner creates
  * names like <code>[1: fib(3)=2]</code>. If you don't use the name parameter,
@@ -163,6 +173,7 @@ import org.junit.runners.parameterized.TestWithParameters;
  * @since 4.0
  */
 public class Parameterized extends Suite {
+
     /**
      * Annotation for a method which provides parameters to be injected into the
      * test class constructor by <code>Parameterized</code>. The method has to
@@ -233,6 +244,8 @@ public class Parameterized extends Suite {
     private static final ParametersRunnerFactory DEFAULT_FACTORY = new BlockJUnit4ClassRunnerWithParametersFactory();
 
     private static final List<Runner> NO_RUNNERS = Collections.<Runner>emptyList();
+
+    private static final Pattern INDEX_MATCHER_PATTERN = Pattern.compile("(\\{)index([^\\}]*\\})");
 
     private final List<Runner> runners;
 
@@ -342,8 +355,12 @@ public class Parameterized extends Suite {
 
     private static TestWithParameters createTestWithParameters(
             TestClass testClass, String pattern, int index, Object[] parameters) {
-        String finalPattern = pattern.replaceAll("\\{index\\}",
-                Integer.toString(index));
+        String finalPattern = pattern;
+        Matcher matcher = INDEX_MATCHER_PATTERN.matcher(pattern);
+        while (matcher.find()) {
+            String idxPattern = matcher.group(1) + "0" + matcher.group(2);
+            finalPattern = finalPattern.replace(matcher.group(), MessageFormat.format(idxPattern, index));
+        }
         String name = MessageFormat.format(finalPattern, parameters);
         return new TestWithParameters("[" + name + "]", testClass,
                 Arrays.asList(parameters));
