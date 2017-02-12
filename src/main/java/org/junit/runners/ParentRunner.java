@@ -190,10 +190,15 @@ public abstract class ParentRunner<T> extends Runner implements Filterable,
     protected Statement classBlock(final RunNotifier notifier) {
         Statement statement = childrenInvoker(notifier);
         if (!areAllChildrenIgnored()) {
-            statement = withBeforeClasses(statement);
-            statement = withAfterClasses(statement);
-            statement = withClassRules(statement);
+            statement = withClassStatements(statement);
         }
+        return statement;
+    }
+
+    protected Statement withClassStatements(Statement statement) {
+        statement = withBeforeClasses(statement);
+        statement = withAfterClasses(statement);
+        statement = withClassRules(statement, getDescription());
         return statement;
     }
 
@@ -238,13 +243,14 @@ public abstract class ParentRunner<T> extends Runner implements Filterable,
      * annotated with {@link ClassRule}.
      *
      * @param statement the base statement
+     * @param description the description to pass to the {@link Rule}s
      * @return a RunRules statement if any class-level {@link Rule}s are
      *         found, or the base statement
      */
-    private Statement withClassRules(Statement statement) {
+    protected Statement withClassRules(Statement statement, Description description) {
         List<TestRule> classRules = classRules();
         return classRules.isEmpty() ? statement :
-                new RunRules(statement, classRules, getDescription());
+                new RunRules(statement, classRules, description);
     }
 
     /**

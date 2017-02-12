@@ -12,7 +12,7 @@ import java.util.Collections;
 import java.util.List;
 
 import org.junit.runner.Runner;
-import org.junit.runners.model.FrameworkMethod;
+import org.junit.runners.model.ParameterizedTestClass;
 import org.junit.runners.model.TestClass;
 import org.junit.runners.parameterized.BlockJUnit4ClassRunnerWithParametersFactory;
 import org.junit.runners.parameterized.ParametersRunnerFactory;
@@ -244,7 +244,7 @@ public class Parameterized extends Suite {
     private static class RunnersFactory {
         private static final ParametersRunnerFactory DEFAULT_FACTORY = new BlockJUnit4ClassRunnerWithParametersFactory();
 
-        private final TestClass testClass;
+        private final ParameterizedTestClass testClass;
 
         static List<Runner> createRunnersForClass(Class<?> klass)
                 throws Throwable {
@@ -252,14 +252,12 @@ public class Parameterized extends Suite {
         }
 
         private RunnersFactory(Class<?> klass) {
-            testClass = new TestClass(klass);
+            testClass = new ParameterizedTestClass(klass);
         }
 
         private List<Runner> createRunners() throws Throwable {
-            Parameters parameters = getParametersMethod().getAnnotation(
-                    Parameters.class);
             return Collections.unmodifiableList(createRunnersForParameters(
-                    allParameters(), parameters.name(),
+                    testClass.allParameters(), testClass.getNamePatternForParameters(),
                     getParametersRunnerFactory()));
         }
 
@@ -278,35 +276,9 @@ public class Parameterized extends Suite {
 
         private TestWithParameters createTestWithNotNormalizedParameters(
                 String pattern, int index, Object parametersOrSingleParameter) {
-            Object[] parameters = (parametersOrSingleParameter instanceof Object[]) ? (Object[]) parametersOrSingleParameter
-                    : new Object[] { parametersOrSingleParameter };
+            Object[] parameters = ParameterizedTestClass.normalizeParameter(parametersOrSingleParameter);
             return createTestWithParameters(testClass, pattern, index,
                     parameters);
-        }
-
-        @SuppressWarnings("unchecked")
-        private Iterable<Object> allParameters() throws Throwable {
-            Object parameters = getParametersMethod().invokeExplosively(null);
-            if (parameters instanceof Iterable) {
-                return (Iterable<Object>) parameters;
-            } else if (parameters instanceof Object[]) {
-                return Arrays.asList((Object[]) parameters);
-            } else {
-                throw parametersMethodReturnedWrongType();
-            }
-        }
-
-        private FrameworkMethod getParametersMethod() throws Exception {
-            List<FrameworkMethod> methods = testClass
-                    .getAnnotatedMethods(Parameters.class);
-            for (FrameworkMethod each : methods) {
-                if (each.isStatic() && each.isPublic()) {
-                    return each;
-                }
-            }
-
-            throw new Exception("No public static parameters method on class "
-                    + testClass.getName());
         }
 
         private List<Runner> createRunnersForParameters(
@@ -322,7 +294,7 @@ public class Parameterized extends Suite {
                 }
                 return runners;
             } catch (ClassCastException e) {
-                throw parametersMethodReturnedWrongType();
+                throw testClass.parametersMethodReturnedWrongType();
             }
         }
 
@@ -338,22 +310,11 @@ public class Parameterized extends Suite {
             return children;
         }
 
-        private Exception parametersMethodReturnedWrongType() throws Exception {
-            String className = testClass.getName();
-            String methodName = getParametersMethod().getName();
-            String message = MessageFormat.format(
-                    "{0}.{1}() must return an Iterable of arrays.", className,
-                    methodName);
-            return new Exception(message);
-        }
-
         private TestWithParameters createTestWithParameters(
                 TestClass testClass, String pattern, int index,
                 Object[] parameters) {
-            String finalPattern = pattern.replaceAll("\\{index\\}",
-                    Integer.toString(index));
-            String name = MessageFormat.format(finalPattern, parameters);
-            return new TestWithParameters("[" + name + "]", testClass,
+            String testName = ParameterizedTestClass.produceTestName(pattern, index, parameters);
+            return new TestWithParameters(testName, testClass,
                     Arrays.asList(parameters));
         }
     }
