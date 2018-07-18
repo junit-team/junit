@@ -5,6 +5,7 @@ import static org.junit.internal.runners.rules.RuleMemberValidator.CLASS_RULE_ME
 import static org.junit.internal.runners.rules.RuleMemberValidator.CLASS_RULE_VALIDATOR;
 
 import java.lang.annotation.Annotation;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -16,11 +17,7 @@ import java.util.List;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Ignore;
-import org.junit.Rule;
+import org.junit.*;
 import org.junit.internal.AssumptionViolatedException;
 import org.junit.internal.runners.model.EachTestNotifier;
 import org.junit.internal.runners.statements.RunAfters;
@@ -29,11 +26,7 @@ import org.junit.rules.RunRules;
 import org.junit.rules.TestRule;
 import org.junit.runner.Description;
 import org.junit.runner.Runner;
-import org.junit.runner.manipulation.Filter;
-import org.junit.runner.manipulation.Filterable;
-import org.junit.runner.manipulation.NoTestsRemainException;
-import org.junit.runner.manipulation.Sortable;
-import org.junit.runner.manipulation.Sorter;
+import org.junit.runner.manipulation.*;
 import org.junit.runner.notification.RunNotifier;
 import org.junit.runner.notification.StoppedByUserException;
 import org.junit.runners.model.FrameworkMember;
@@ -55,13 +48,13 @@ import org.junit.validator.TestClassValidator;
  * must implement finding the children of the node, describing each child, and
  * running each child. ParentRunner will filter and sort children, handle
  * {@code @BeforeClass} and {@code @AfterClass} methods,
- * handle annotated {@link ClassRule}s, create a composite
- * {@link Description}, and run children sequentially.
+ * handle annotated {@link ClassRule}s, handle provided global {@link TestRule}s,
+ * create a composite {@link Description}, and run children sequentially.
  *
  * @since 4.5
  */
 public abstract class ParentRunner<T> extends Runner implements Filterable,
-        Sortable {
+        Sortable, GlobalRuleRunnable {
     private static final List<TestClassValidator> VALIDATORS = Arrays.<TestClassValidator>asList(
             new AnnotationsValidator());
 
@@ -70,6 +63,8 @@ public abstract class ParentRunner<T> extends Runner implements Filterable,
 
     // Guarded by childrenLock
     private volatile Collection<T> filteredChildren = null;
+
+    private List<TestRule> globalRules = new ArrayList<TestRule>();
 
     private volatile RunnerScheduler scheduler = new RunnerScheduler() {
         public void schedule(Runnable childStatement) {
@@ -192,6 +187,7 @@ public abstract class ParentRunner<T> extends Runner implements Filterable,
      * construct a statement that will:
      * <ol>
      * <li>Apply all {@code ClassRule}s on the test-class and superclasses.</li>
+     * <li>Apply all global {@code TestRule}s on the test-class and superclasses.</li>
      * <li>Run all non-overridden {@code @BeforeClass} methods on the test-class
      * and superclasses; if any throws an Exception, stop execution and pass the
      * exception on.</li>
@@ -212,6 +208,7 @@ public abstract class ParentRunner<T> extends Runner implements Filterable,
             statement = withBeforeClasses(statement);
             statement = withAfterClasses(statement);
             statement = withClassRules(statement);
+            statement = withGlobalRules(statement);
         }
         return statement;
     }
@@ -264,6 +261,20 @@ public abstract class ParentRunner<T> extends Runner implements Filterable,
         List<TestRule> classRules = classRules();
         return classRules.isEmpty() ? statement :
                 new RunRules(statement, classRules, getDescription());
+    }
+
+    /**
+     * Returns a {@link Statement}: apply all
+     * classes assignable to {@link TestRule} provided
+     * by command line argument {@code --global-rule}.
+     *
+     * @param statement the base statement
+     * @return a RunRules statement if any global-level {@link TestRule}s are
+     *         provided, or the base statement
+     */
+    private Statement withGlobalRules(Statement statement) {
+        return globalRules.isEmpty() ? statement :
+                new RunRules(statement, globalRules, getDescription());
     }
 
     /**
@@ -403,7 +414,7 @@ public abstract class ParentRunner<T> extends Runner implements Filterable,
     }
 
     //
-    // Implementation of Filterable and Sortable
+    // Implementation of Filterable, Sortable and GlobalRuleRunnable
     //
 
     public void filter(Filter filter) throws NoTestsRemainException {
@@ -440,6 +451,29 @@ public abstract class ParentRunner<T> extends Runner implements Filterable,
             List<T> sortedChildren = new ArrayList<T>(getFilteredChildren());
             Collections.sort(sortedChildren, comparator(sorter));
             filteredChildren = Collections.unmodifiableCollection(sortedChildren);
+        } finally {
+            childrenLock.unlock();
+        }
+    }
+
+    public void setGlobalRules(GlobalRuleRunner rules) throws Exception {
+        childrenLock.lock();
+        try {
+            for (T each : getFilteredChildren()) {
+                rules.apply(each);
+            }
+            for (Class<?> clazz : rules.getRules()) {
+                Constructor<?>[] constructors = clazz.getConstructors();
+                if (constructors.length > 1) {
+                    throw new IllegalArgumentException("Global TestRule can only have one constructor");
+                }
+                Assert.assertEquals(1, constructors.length);
+                Constructor<?> constructor = clazz.getConstructors()[0];
+                if (constructor.getParameterTypes().length > 0) {
+                    throw new IllegalArgumentException("Global TestRule constructor cannot have parameters");
+                }
+                globalRules.add(TestRule.class.cast(constructor.newInstance()));
+            }
         } finally {
             childrenLock.unlock();
         }
